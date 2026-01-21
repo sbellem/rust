@@ -1,0 +1,86 @@
+name: Build and push Rust Xous toolchain Docker image
+
+on:
+  push:
+    branches:
+      - 'docker-*'
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      rust_version:
+        description: 'Rust version (e.g., 1.92.0)'
+        required: true
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository_owner }}/rust-xous-toolchain
+
+jobs:
+  build-toolchain-image:
+    runs-on: ubuntu-latest
+    if: github.repository == 'sbellem/rust'
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      matrix:
+        include:
+          - dockerfile: Dockerfile
+            suffix: ""
+          - dockerfile: Dockerfile.alpine
+            suffix: "-alpine"
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+        with:
+          submodules: 'recursive'
+
+      - name: Determine Rust version
+        id: version
+        run: |
+          if [ -n "${{ github.event.inputs.rust_version }}" ]; then
+            # Manual workflow dispatch - use provided version
+            echo "rust_version=${{ github.event.inputs.rust_version }}" >> $GITHUB_OUTPUT
+          elif [[ "${{ github.ref_name }}" =~ ^[0-9]+\.[0-9]+\.[0-9]+ ]]; then
+            # Release tag (e.g., 1.92.0.1 -> 1.92.0)
+            version=$(echo "${{ github.ref_name }}" | cut -d. -f1,2,3)
+            echo "rust_version=${version}" >> $GITHUB_OUTPUT
+          else
+            # Branch push - read version from Dockerfile ARG default
+            version=$(grep -oP 'ARG RUST_VERSION="\K[^"]+' Dockerfile)
+            echo "rust_version=${version}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=${{ steps.version.outputs.rust_version }}${{ matrix.suffix }}
+            type=raw,value=latest${{ matrix.suffix }}
+
+      - name: Build and push toolchain image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./${{ matrix.dockerfile }}
+          build-args: |
+            RUST_VERSION=${{ steps.version.outputs.rust_version }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          provenance: false
+          sbom: false

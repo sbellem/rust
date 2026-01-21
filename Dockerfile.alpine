@@ -1,0 +1,73 @@
+# Rust toolchain with xous target built from source (Alpine variant)
+#
+# This image is published to ghcr.io/betrusted-io/rust-xous-toolchain:alpine
+# and used by xous-core CI for reproducible builds.
+#
+# Smaller image size (~80MB vs ~300MB) but uses musl libc.
+
+ARG RUST_VERSION="1.93.0"
+FROM rust:${RUST_VERSION}-alpine AS builder
+
+# Install build dependencies
+RUN apk add --no-cache \
+        curl \
+        git \
+        ca-certificates \
+        build-base \
+        xz
+
+# Install RISC-V GNU toolchain
+RUN set -eux; \
+    curl -fsSL https://github.com/xpack-dev-tools/riscv-none-embed-gcc-xpack/releases/download/v10.2.0-1.2/xpack-riscv-none-embed-gcc-10.2.0-1.2-linux-x64.tar.gz \
+    | tar -xzf - -C /opt; \
+    ln -s /opt/xpack-riscv-none-embed-gcc-10.2.0-1.2 /opt/riscv-gcc
+
+ENV PATH="/opt/riscv-gcc/bin:${PATH}" \
+    CC=riscv-none-embed-gcc \
+    AR=riscv-none-embed-ar
+
+RUN rustup target add riscv32imac-unknown-none-elf
+
+WORKDIR /build
+COPY . .
+
+# Setup xous target directory
+RUN mkdir -p "$(rustc --print sysroot)/lib/rustlib/riscv32imac-unknown-xous-elf/lib" \
+    && rustc --version | awk '{print $2}' > "$(rustc --print sysroot)/lib/rustlib/riscv32imac-unknown-xous-elf/RUST_VERSION"
+
+# Build libstd for xous target (matching rust-xous-release.yml CI settings)
+ENV CARGO_PROFILE_RELEASE_DEBUG=0 \
+    CARGO_PROFILE_RELEASE_OPT_LEVEL=3 \
+    CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS=false \
+    RUSTC_BOOTSTRAP=1 \
+    RUSTFLAGS="-Cforce-unwind-tables=yes -Cembed-bitcode=yes -Zforce-unstable-if-unmarked" \
+    __CARGO_DEFAULT_LIB_METADATA=stablestd
+
+RUN export RUST_COMPILER_RT_ROOT=$(pwd)/src/llvm-project/compiler-rt \
+    && cargo build \
+        --target riscv32imac-unknown-xous-elf \
+        -Zbinary-dep-depinfo \
+        --release \
+        --features "panic-unwind compiler-builtins-c compiler-builtins-mem" \
+        --manifest-path "library/sysroot/Cargo.toml" \
+    && cp library/target/riscv32imac-unknown-xous-elf/release/deps/*.rlib \
+        "$(rustc --print sysroot)/lib/rustlib/riscv32imac-unknown-xous-elf/lib/"
+
+
+# Final image - Alpine for smaller size
+FROM rust:${RUST_VERSION}-alpine
+
+RUN apk add --no-cache git
+
+# Add bare-metal RISC-V target
+RUN rustup target add riscv32imac-unknown-none-elf
+
+# Copy the built xous sysroot from builder
+ARG RUST_VERSION
+COPY --from=builder /usr/local/rustup/toolchains/${RUST_VERSION}-x86_64-unknown-linux-musl/lib/rustlib/riscv32imac-unknown-xous-elf \
+    /usr/local/rustup/toolchains/${RUST_VERSION}-x86_64-unknown-linux-musl/lib/rustlib/riscv32imac-unknown-xous-elf
+
+# Create non-root user (Alpine uses adduser, not useradd)
+RUN adduser -D -u 1000 baozi
+USER baozi
+WORKDIR /home/baozi

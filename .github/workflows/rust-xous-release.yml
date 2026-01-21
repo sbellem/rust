@@ -1,6 +1,11 @@
 name: Rust for Xous
 
-on: [push]
+on:
+  push:
+    tags:
+      - '[0-9]+.[0-9]+.[0-9]+*'
+    branches:
+      - '[0-9]+.[0-9]+.[0-9]+-xous'
 
 jobs:
   build-libstd:

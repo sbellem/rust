@@ -48,7 +48,7 @@ ARG RUST_VERSION
 COPY --from=builder /usr/local/rustup/toolchains/${RUST_VERSION}-x86_64-unknown-linux-gnu/lib/rustlib/riscv32imac-unknown-xous-elf \
     /usr/local/rustup/toolchains/${RUST_VERSION}-x86_64-unknown-linux-musl/lib/rustlib/riscv32imac-unknown-xous-elf
 
-# Create non-root user for builds
-RUN adduser -D -u 1000 builder
-USER builder
-WORKDIR /home/builder/src
+# Create non-root user
+RUN useradd --create-home --uid 1000 baozi
+USER baozi
+WORKDIR /home/baozi

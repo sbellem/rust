@@ -1,6 +1,9 @@
 name: Build and push Rust Xous toolchain Docker image
 
 on:
+  push:
+    branches:
+      - 'docker-*'
   release:
     types: [published]
   workflow_dispatch:

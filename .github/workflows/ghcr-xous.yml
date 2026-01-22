@@ -19,6 +19,7 @@ env:
 jobs:
   build-toolchain-image:
     runs-on: ubuntu-latest
+    if: github.repository == 'sbellem/rust'
     permissions:
       contents: read
       packages: write
@@ -40,10 +41,15 @@ jobs:
         id: version
         run: |
           if [ -n "${{ github.event.inputs.rust_version }}" ]; then
+            # Manual workflow dispatch - use provided version
             echo "rust_version=${{ github.event.inputs.rust_version }}" >> $GITHUB_OUTPUT
-          else
-            # Extract version from release tag (e.g., 1.92.0.1 -> 1.92.0)
+          elif [[ "${{ github.ref_name }}" =~ ^[0-9]+\.[0-9]+\.[0-9]+ ]]; then
+            # Release tag (e.g., 1.92.0.1 -> 1.92.0)
             version=$(echo "${{ github.ref_name }}" | cut -d. -f1,2,3)
+            echo "rust_version=${version}" >> $GITHUB_OUTPUT
+          else
+            # Branch push - read version from Dockerfile ARG default
+            version=$(grep -oP 'ARG RUST_VERSION="\K[^"]+' Dockerfile)
             echo "rust_version=${version}" >> $GITHUB_OUTPUT
           fi
 

@@ -29,6 +29,8 @@ RUN rustup target add riscv32imac-unknown-none-elf
 WORKDIR /build
 COPY . .
 
+# Match the official release build settings (debug assertions disabled for smaller binaries)
+ENV CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS=false
 RUN ./rebuild.sh
 
 

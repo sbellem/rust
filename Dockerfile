@@ -20,18 +20,36 @@ RUN set -eux; \
     | tar -xzf - -C /opt; \
     ln -s /opt/xpack-riscv-none-embed-gcc-10.2.0-1.2 /opt/riscv-gcc
 
-ENV PATH="/opt/riscv-gcc/bin:${PATH}" \
-    CC=riscv-none-embed-gcc \
-    AR=riscv-none-embed-ar
+ENV PATH="/opt/riscv-gcc/bin:${PATH}"
 
 RUN rustup target add riscv32imac-unknown-none-elf
 
 WORKDIR /build
 COPY . .
 
-# Match the official release build settings (debug assertions disabled for smaller binaries)
-ENV CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS=false
-RUN ./rebuild.sh
+# Setup xous target directory
+RUN mkdir -p "$(rustc --print sysroot)/lib/rustlib/riscv32imac-unknown-xous-elf/lib" \
+    && rustc --version | awk '{print $2}' > "$(rustc --print sysroot)/lib/rustlib/riscv32imac-unknown-xous-elf/RUST_VERSION"
+
+# Build libstd for xous target (matching rust-xous-release.yml CI settings)
+ENV CARGO_PROFILE_RELEASE_DEBUG=0 \
+    CARGO_PROFILE_RELEASE_OPT_LEVEL=3 \
+    CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS=false \
+    RUSTC_BOOTSTRAP=1 \
+    RUSTFLAGS="-Cforce-unwind-tables=yes -Cembed-bitcode=yes -Zforce-unstable-if-unmarked" \
+    __CARGO_DEFAULT_LIB_METADATA=stablestd \
+    CC=riscv-none-embed-gcc \
+    AR=riscv-none-embed-ar
+
+RUN export RUST_COMPILER_RT_ROOT=$(pwd)/src/llvm-project/compiler-rt \
+    && cargo build \
+        --target riscv32imac-unknown-xous-elf \
+        -Zbinary-dep-depinfo \
+        --release \
+        --features "panic-unwind compiler-builtins-c compiler-builtins-mem" \
+        --manifest-path "library/sysroot/Cargo.toml" \
+    && cp library/target/riscv32imac-unknown-xous-elf/release/deps/*.rlib \
+        "$(rustc --print sysroot)/lib/rustlib/riscv32imac-unknown-xous-elf/lib/"
 
 
 FROM rust:${RUST_VERSION}-slim-bullseye
